@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat App</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="flex justify-center items-center w-full h-screen bg-gray-100">
+    <div
+      class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4 w-full max-w-6xl"
+    >
+      <% if (userType === 'server') { %>
+      <div
+        class="w-full md:w-1/3 h-96 bg-white p-4 rounded-lg shadow-lg overflow-auto"
+      >
+        <h2 class="text-xl font-bold mb-4">Server</h2>
+        <div id="serverMessages" class="space-y-2"></div>
+      </div>
+      <% } else { %>
+      <div
+        class="w-full md:w-1/3 h-96 bg-white p-4 rounded-lg shadow-lg overflow-auto"
+      >
+        <h2 class="text-xl font-bold mb-4">Client <%= clientId %></h2>
+        <div id="clientMessages" class="space-y-2"></div>
+
+        <form id="chatForm" class="mt-4 flex">
+          <input
+            type="text"
+            id="messageInput"
+            placeholder="Type your message..."
+            class="flex-grow p-2 border border-gray-300 rounded-l-lg focus:outline-none"
+          />
+          <button
+            type="submit"
+            class="p-2 bg-blue-500 text-white rounded-r-lg hover:bg-blue-600"
+          >
+            Send
+          </button>
+        </form>
+
+        <input
+          type="file"
+          id="fileInput"
+          class="mt-4 p-2 border border-gray-300 rounded-lg w-full"
+        />
+        <button
+          id="sendFileButton"
+          class="mt-4 p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 w-full hidden"
+        >
+          Send File
+        </button>
+        <div id="filePreview" class="mt-4"></div>
+
+        <button
+          id="recordButton"
+          class="mt-4 p-2 bg-green-500 text-white rounded-lg hover:bg-green-600 w-full"
+        >
+          Record Voice Note
+        </button>
+        <button
+          id="recordVideoButton"
+          class="mt-4 p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 w-full"
+        >
+          Record Video Note
+        </button>
+
+        <!-- Webcam Preview -->
+        <video
+          id="videoPreview"
+          class="mt-4 w-full hidden"
+          autoplay
+          muted
+        ></video>
+        <button
+          id="sendVideoButton"
+          class="mt-4 p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 hidden w-full"
+        >
+          Send Video
+        </button>
+      </div>
+      <% } %>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+
+      let audioRecorder;
+      let videoRecorder;
+      let audioStream;
+      let videoStream;
+      let videoChunks = [];
+
+      socket.on("message", (message) => {
+        const clientMessagesDiv = document.getElementById("clientMessages");
+        const serverMessagesDiv = document.getElementById("serverMessages");
+        const messageElement = document.createElement("p");
+        messageElement.className = "p-2 bg-gray-200 rounded-lg";
+        messageElement.textContent = message;
+
+        if (clientMessagesDiv) {
+          clientMessagesDiv.appendChild(messageElement.cloneNode(true));
+        }
+        if (serverMessagesDiv) {
+          serverMessagesDiv.appendChild(messageElement);
+        }
+      });
+
+      socket.on("audioMessage", (audioUrl) => {
+        const clientMessagesDiv = document.getElementById("clientMessages");
+        const serverMessagesDiv = document.getElementById("serverMessages");
+        const audioElement = document.createElement("audio");
+        audioElement.controls = true;
+        audioElement.src = audioUrl;
+
+        if (clientMessagesDiv) {
+          clientMessagesDiv.appendChild(audioElement.cloneNode(true));
+        }
+        if (serverMessagesDiv) {
+          serverMessagesDiv.appendChild(audioElement);
+        }
+      });
+
+      socket.on("videoMessage", (videoUrl) => {
+        const clientMessagesDiv = document.getElementById("clientMessages");
+        const serverMessagesDiv = document.getElementById("serverMessages");
+        const videoElement = document.createElement("video");
+        videoElement.controls = true;
+        videoElement.src = videoUrl;
+
+        if (clientMessagesDiv) {
+          clientMessagesDiv.appendChild(videoElement.cloneNode(true));
+        }
+        if (serverMessagesDiv) {
+          serverMessagesDiv.appendChild(videoElement);
+        }
+      });
+
+      socket.on("fileMessage", (fileData) => {
+        const clientMessagesDiv = document.getElementById("clientMessages");
+        const serverMessagesDiv = document.getElementById("serverMessages");
+        const fileLink = document.createElement("a");
+        fileLink.href = fileData.url;
+        fileLink.download = fileData.name;
+        fileLink.textContent = fileData.name;
+        fileLink.className = "p-2 bg-gray-200 rounded-lg block";
+
+        if (clientMessagesDiv) {
+          clientMessagesDiv.appendChild(fileLink.cloneNode(true));
+        }
+        if (serverMessagesDiv) {
+          serverMessagesDiv.appendChild(fileLink);
+        }
+      });
+
+      document.getElementById("chatForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const messageInput = document.getElementById("messageInput");
+        const message = messageInput.value;
+        socket.emit("chatMessage", message);
+        messageInput.value = "";
+      });
+
+      document.getElementById("recordButton").addEventListener("click", async () => {
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioRecorder = new MediaRecorder(audioStream);
+        audioRecorder.start();
+
+        let audioChunks = [];
+        audioRecorder.addEventListener("dataavailable", (event) => {
+          audioChunks.push(event.data);
+        });
+
+        audioRecorder.addEventListener("stop", () => {
+          const audioBlob = new Blob(audioChunks);
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result.split(",")[1];
+            socket.emit("voiceNote", base64);
+          };
+          reader.readAsDataURL(audioBlob);
+        });
+
+        setTimeout(() => {
+          audioRecorder.stop();
+        }, 5000); // Record for 5 seconds
+      });
+
+      document.getElementById("recordVideoButton").addEventListener("click", async () => {
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const videoPreview = document.getElementById("videoPreview");
+        videoPreview.srcObject = videoStream;
+        videoPreview.classList.remove("hidden");
+
+        videoRecorder = new MediaRecorder(videoStream);
+        videoRecorder.start();
+
+        videoChunks = [];
+        videoRecorder.addEventListener("dataavailable", (event) => {
+          videoChunks.push(event.data);
+        });
+
+        videoRecorder.addEventListener("stop", () => {
+          const videoBlob = new Blob(videoChunks, { type: "video/webm" });
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result.split(",")[1];
+            socket.emit("videoNote", base64);
+          };
+          reader.readAsDataURL(videoBlob);
+          videoPreview.classList.add("hidden");
+          videoPreview.srcObject = null;
+        });
+
+        setTimeout(() => {
+          videoRecorder.stop();
+        }, 5000); // Record for 5 seconds
+        document.getElementById("sendVideoButton").classList.remove("hidden");
+      });
+
+      document.getElementById("fileInput").addEventListener("change", (event) => {
+        const file = event.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result.split(",")[1];
+            socket.emit("fileNote", { data: base64, name: file.name });
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    </script>
+  </body>
+</html>
